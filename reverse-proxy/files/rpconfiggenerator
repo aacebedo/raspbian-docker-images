@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+import argparse
+import logging
+from logging import StreamHandler
+from logging.handlers import SysLogHandler
+import requests
+import json
+import sys
+from quik import Template
+from json import JSONEncoder
+
+SYSTEMLOGGER = logging.getLogger("rpconfiggenerator.system")
+OUTPUTLOGGER = logging.getLogger("rpconfiggenerator.output")
+    
+def _default(self, obj):
+    return getattr(obj.__class__, "__json__", _default.default)(obj)
+
+_default.default = JSONEncoder().default  # Save unmodified default.
+JSONEncoder.default = _default # replacement
+
+class Endpoint:
+  def __init__(self,address,port):
+    self.address = address
+    self.port = port
+  
+  def __str__(self):
+    return "{}:{}".format(self.address,self.port)
+  
+  def __json__(self):
+    return {"address":self.address,"port":self.port}
+  
+  
+class Upstream:
+  def __init__(self,name):
+    self.name = name
+    self.servers = []
+    
+  def __str__(self):
+    return "{}:{}".format(self.name,self.servers)
+  def __repr__(self):
+    return self.__str__()
+  
+  def __json__(self):
+    return {'name':self.name,"servers": self.servers}
+  
+class Server:
+  def __init__(self,domain,port,upstream):
+    self.domain = domain
+    self.port= port
+    self.upstream = upstream
+    
+  def __str__(self):
+    return "{}:{}".format(self.domain,self.port)
+  def __repr__(self):
+    return self.__str__()
+  
+  def __json__(self):
+    return {'domain':self.domain,"upstream": self.upstream,"port":self.port}
+
+
+class ReverseProxyConfigurationGenerator:
+  @staticmethod
+  def main():
+    ReverseProxyConfigurationGenerator.init_loggers()
+    args = ReverseProxyConfigurationGenerator.parse_arguments(sys.argv[1:])
+    print(ReverseProxyConfigurationGenerator.generate(args))
+
+  @staticmethod
+  def init_loggers():
+    """
+    Initialize loggers of the program
+    """
+    formatter = logging.Formatter('%(message)s')
+    output_hdlr = StreamHandler(sys.stdout)
+#    system_hdlr = SysLogHandler(address='/dev/log',
+#                             facility=SysLogHandler.LOG_DAEMON)
+    output_hdlr.setLevel(1)
+
+    output_hdlr.setFormatter(formatter)
+#    system_hdlr.setFormatter(formatter)
+    SYSTEMLOGGER.addHandler(output_hdlr)
+    OUTPUTLOGGER.addHandler(output_hdlr)
+
+
+  @staticmethod
+  def generate(args):
+    res = ""
+    upstreams = []
+    servers = []
+    template = Template("""
+#for @upstream in @upstreams:
+upstream @upstream.name {
+  least_conn;
+#for @server in @upstream.servers:  server @server.address:@server.port max_fails=3 fail_timeout=60 weight=1;
+#end
+}
+#end
+#for @server in @servers:
+server {
+   listen @server.port;
+   server_name @server.domain;
+   charset utf-8;
+ 
+   location / {
+     proxy_pass http://@server.upstream/;
+     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+     proxy_set_header Host $host;
+     proxy_set_header X-Real-IP $remote_addr;
+   }
+ }
+#end
+""")
+    try:
+      req = requests.get("http://{}/v1/catalog/services".format(args.consul))
+      if req.status_code == requests.codes.ok:
+        for service_name in json.loads(req.content.decode()).keys():
+          req = requests.get('http://{}/v1/catalog/service/{}'.format(args.consul,service_name))
+          service_json = json.loads(req.content.decode())
+          service_description = {}
+          for tag in service_json[0]["ServiceTags"]:
+              parsed_tag = tag.split(":")
+              if len(parsed_tag) == 2:
+                service_description[parsed_tag[0]] = parsed_tag[1]
+          if len(service_description) != 0:
+            service_description["internal_ip"] = service_json[0]["ServiceAddress"]
+            service_description["internal_port"] = service_json[0]["ServicePort"]
+            
+            upstream = [x for x in filter(lambda u: u.name == service_description["name"], upstreams)]
+            if(len(upstream) == 0):
+              upstream = Upstream(service_description["name"])
+              upstreams.append(upstream)
+            else:
+              upstream = upstream[0]
+            upstream.servers.append(Endpoint(service_description["internal_ip"],service_description["internal_port"]))
+            
+            server = [x for x in filter(lambda u: u.domain == service_description["domain"] and u.port == service_description["port"], servers)]
+            if(len(servers) == 0):
+              server = Server(service_description["domain"],service_description["port"],service_description["name"])
+              servers.append(server)
+          res = template.render({"upstreams":upstreams,"servers":servers}) 
+    except requests.exceptions.ConnectionError as e:
+      SYSTEMLOGGER.error("Unable to connect to {} ({}).".format(args.consul,str(e)))
+    return res
+
+  @staticmethod
+  def parse_arguments(raw_args):
+        parser = argparse.ArgumentParser(
+            prog="ReverseProxyConfigurationGenerator",
+            description='Generate a nginx configuration file based on docker labels.')
+        
+        parser.add_argument(
+            'consul', 
+            help='Address of consul server',
+            type=str)
+        # Parse the command
+        parsed_args = parser.parse_args(raw_args)
+        return parsed_args
+
+if __name__ == "__main__":
+    sys.exit(ReverseProxyConfigurationGenerator.main())
+

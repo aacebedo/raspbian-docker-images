@@ -1,0 +1,8 @@
+
+
+template {
+  source = "/mnt/consul-template/templates/reverse-proxy.ctmpl"
+  destination = "/etc/nginx/sites-enabled/reverse-proxy"
+  command = "service nginx reload"
+}
+

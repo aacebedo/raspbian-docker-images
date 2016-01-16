@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+import json
+import argparse
+import sys
+
+class ServiceParser:
+    @staticmethod
+    def parse_service(service_tags_str):
+        service_description = {"port":None,"domain":None,"ip":None,"name":None}
+
+        service_tags = service_tags_str.split(",")
+        for tag in service_tags:
+            parsed_tag = tag.split(":")
+            if len(parsed_tag) == 2:
+                if parsed_tag[0] in service_description.keys():
+                    service_description[parsed_tag[0]] = parsed_tag[1]
+        for key,value in service_description.items():
+            if value == None:
+              raise ValueError("Invalid service description, missing attribute '{}'".format(key))
+        return service_description
+
+    @staticmethod
+    def parse_arguments(args):
+        parser = argparse.ArgumentParser(
+            prog="ServiceParser",
+            description='Service parser.')
+        parser.add_argument(
+            'service_tags',
+            help='tags to parse',
+            type=str)
+        return parser.parse_args(args)
+
+    @staticmethod
+    def main(args):
+        res = 0
+        try:
+            parsed_args = ServiceParser.parse_arguments(args)
+            service_description = ServiceParser.parse_service(parsed_args.service_tags)
+            print(json.dumps(service_description))
+        except Exception as e:
+            res = -1
+        return res
+
+if __name__ == "__main__":
+    sys.exit(ServiceParser.main(sys.argv[1:]))

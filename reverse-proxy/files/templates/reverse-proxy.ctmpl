@@ -1,0 +1,1 @@
+{{ env "CONSUL_HTTP_ADDR" |  plugin "/mnt/consul-template/rpconfiggenerator" }}

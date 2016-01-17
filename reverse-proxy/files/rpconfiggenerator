@@ -75,10 +75,10 @@ class ReverseProxyConfigurationGenerator:
 #    system_hdlr = SysLogHandler(address='/dev/log',
 #                             facility=SysLogHandler.LOG_DAEMON)
     output_hdlr.setLevel(1)
-
+#    system_hdlr.setLevel(1)
     output_hdlr.setFormatter(formatter)
-#    system_hdlr.setFormatter(formatter)
-    SYSTEMLOGGER.addHandler(output_hdlr)
+ #   system_hdlr.setFormatter(formatter)
+ #   SYSTEMLOGGER.addHandler(system_hdlr)
     OUTPUTLOGGER.addHandler(output_hdlr)
 
 
@@ -132,12 +132,10 @@ server {
             else:
               upstream = upstream[0]
             upstream.servers.append(Endpoint(service_description["internal_ip"],service_description["internal_port"]))
-            
-            server = [x for x in filter(lambda u: u.domain == service_description["domain"] and u.port == service_description["port"], servers)]
-            if(len(servers) == 0):
+            if(len([x for x in filter(lambda u: u.domain == service_description["domain"] and u.port == service_description["port"], servers)]) == 0):
               server = Server(service_description["domain"],service_description["port"],service_description["name"])
               servers.append(server)
-          res = template.render({"upstreams":upstreams,"servers":servers}) 
+        res = template.render({"upstreams":upstreams,"servers":servers}) 
     except requests.exceptions.ConnectionError as e:
       SYSTEMLOGGER.error("Unable to connect to {} ({}).".format(args.consul,str(e)))
     return res
@@ -149,6 +147,7 @@ server {
             description='Generate a nginx configuration file based on docker labels.')
         
         parser.add_argument(
+        
             'consul', 
             help='Address of consul server',
             type=str)

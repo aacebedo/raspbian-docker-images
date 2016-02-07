@@ -125,7 +125,13 @@ class SeafileInstaller:
   def generate_nginx_config(nginx_dir, host, install_dir):
     template = Template("""
 server {
-    listen 80;
+      listen     80 default;
+      server_name _;
+      return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443;
     server_name @seafile_host;
 
     proxy_set_header X-Forwarded-For $remote_addr;
